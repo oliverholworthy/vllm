@@ -15,6 +15,7 @@ from vllm.model_executor.layers.activation import get_act_fn
 from vllm.model_executor.models.config import VerifyAndUpdateConfig
 from vllm.transformers_utils.config import (
     try_get_dense_modules,
+    try_get_sentence_transformer_config,
 )
 from vllm.transformers_utils.repo_utils import get_hf_file_bytes
 
@@ -62,7 +63,10 @@ def _load_st_projector(model_config: "ModelConfig") -> nn.Module | None:
             layers.append(linear)
             if act_name := layer_config.get("activation_function"):
                 layers.append(get_act_fn(act_name))
-        return nn.Sequential(*layers).to(dtype=model_config.head_dtype)
+        if layers:
+            return nn.Sequential(*layers).to(dtype=model_config.head_dtype)
+
+        return None
     except Exception:
         logger.exception("ST projector loading failed")
 
@@ -341,6 +345,20 @@ def as_seq_cls_model(cls: type[_T]) -> type[_T]:
             text_config = hf_config.get_text_config()
             model_config = vllm_config.model_config
 
+            st_classifier = _load_st_projector(model_config)
+            sentence_transformer_config = try_get_sentence_transformer_config(
+                model_config.model, model_config.revision
+            )
+            if (
+                st_classifier is None
+                and sentence_transformer_config is not None
+                and sentence_transformer_config.get("model_type") == "CrossEncoder"
+            ):
+                raise ValueError(
+                    "Unable to load the Dense module from this "
+                    "Sentence Transformers CrossEncoder checkpoint."
+                )
+
             # Check if score weights are derived online from LM head
             # (same condition as load_weights branch)
             tokens = getattr(
@@ -354,24 +372,28 @@ def as_seq_cls_model(cls: type[_T]) -> type[_T]:
                 getattr(text_config, "method", None),
             )
 
-            # Online conversion: no score weights in checkpoint, don't
-            # quantize (small output_dim breaks FP8/Marlin tile alignment).
-            # Checkpoint-based: respect the model's quant_config.
-            quant_config = (
-                None
-                if (tokens is not None or method is not None)
-                else vllm_config.quant_config
-            )
+            self._uses_st_classifier = st_classifier is not None
+            if st_classifier is not None:
+                self.score = st_classifier
+            else:
+                # Online conversion: no score weights in checkpoint, don't
+                # quantize (small output_dim breaks FP8/Marlin tile alignment).
+                # Checkpoint-based: respect the model's quant_config.
+                quant_config = (
+                    None
+                    if (tokens is not None or method is not None)
+                    else vllm_config.quant_config
+                )
 
-            self.score = ReplicatedLinear(
-                model_config.get_hidden_size(),
-                _resolve_num_labels(hf_config, text_config),
-                bias=False,
-                params_dtype=model_config.head_dtype,
-                quant_config=quant_config,
-                return_bias=False,
-                prefix=maybe_prefix(prefix, "score"),
-            )
+                self.score = ReplicatedLinear(
+                    model_config.get_hidden_size(),
+                    _resolve_num_labels(hf_config, text_config),
+                    bias=False,
+                    params_dtype=model_config.head_dtype,
+                    quant_config=quant_config,
+                    return_bias=False,
+                    prefix=maybe_prefix(prefix, "score"),
+                )
 
             pooler_config = vllm_config.model_config.pooler_config
             assert pooler_config is not None
@@ -387,6 +409,18 @@ def as_seq_cls_model(cls: type[_T]) -> type[_T]:
                 getattr(text_config, "classifier_from_token", None),
             )
             method = getattr(hf_config, "method", getattr(text_config, "method", None))
+
+            language_model = getattr(self, "language_model", None)
+            uses_st_classifier = getattr(self, "_uses_st_classifier", False) or getattr(
+                language_model, "_uses_st_classifier", False
+            )
+            if uses_st_classifier:
+                backbone_weights = (
+                    (name, weight)
+                    for name, weight in weights
+                    if name not in {"score.weight", "score.bias"}
+                )
+                return super().load_weights(backbone_weights)
 
             def auto_set_score_bias(weights):
                 for name, weight in weights:

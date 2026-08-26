@@ -15,6 +15,9 @@ from vllm.renderers.inputs.preprocess import (
     prompt_to_seq,
 )
 from vllm.tasks import PoolingTask
+from vllm.transformers_utils.config import (
+    try_get_sentence_transformer_config,
+)
 from vllm.utils.mistral import is_mistral_tokenizer
 
 from ...chat_utils import ChatTemplateResolutionError
@@ -411,6 +414,16 @@ class CrossEncoderIOProcessor(ScoringIOProcessor):
         if is_mistral_tokenizer(self.tokenizer):
             raise ValueError("MistralTokenizer not supported for cross-encoding")
 
+        if self.chat_template is None and self.architecture == "Mistral3Model":
+            sentence_transformer_config = try_get_sentence_transformer_config(
+                self.model_config.model, self.model_config.revision
+            )
+            if (
+                sentence_transformer_config is not None
+                and sentence_transformer_config.get("model_type") == "CrossEncoder"
+            ):
+                self.chat_template = getattr(self.tokenizer, "chat_template", None)
+
         from vllm.model_executor.model_loader import get_model_cls
         from vllm.model_executor.models.interfaces import supports_score_template
 
@@ -671,17 +684,31 @@ class CrossEncoderIOProcessor(ScoringIOProcessor):
                         "chat_template_kwargs contains reserved keys that "
                         f"conflict with fixed scorer arguments: {_unexpected}"
                     )
-                full_prompt = safe_apply_chat_template(
-                    model_config,
-                    tokenizer,
-                    [
-                        {"role": "query", "content": prompt_1},
-                        {"role": "document", "content": prompt_2},
-                    ],
-                    chat_template=chat_template,
-                    tools=None,
-                    tokenize=False,
-                    **_safe_kwargs,
+                # Score templates additionally receive the original structured
+                # content alongside the shared chat-message schema.
+                score_template_messages: list[Any] = [
+                    {
+                        "role": "query",
+                        "content": prompt_1,
+                        "content_parts": data_1,
+                    },
+                    {
+                        "role": "document",
+                        "content": prompt_2,
+                        "content_parts": data_2,
+                    },
+                ]
+                full_prompt = cast(
+                    str,
+                    safe_apply_chat_template(
+                        model_config,
+                        tokenizer,
+                        score_template_messages,
+                        chat_template=chat_template,
+                        tools=None,
+                        tokenize=False,
+                        **_safe_kwargs,
+                    ),
                 )
                 prompt_inputs = tokenizer(full_prompt, **encode_kwargs)
             except ChatTemplateResolutionError:

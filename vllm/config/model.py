@@ -40,6 +40,7 @@ from vllm.transformers_utils.config import (
     is_rope_parameters_nested,
     try_get_dense_modules,
     try_get_generation_config,
+    try_get_sentence_transformer_config,
     try_get_tokenizer_config,
     uses_mrope,
     uses_xdrope_dim,
@@ -1197,6 +1198,16 @@ class ModelConfig:
     ) -> ConvertType:
         registry = self.registry
 
+        is_cross_encoder = False
+        if runner_type == "pooling":
+            sentence_transformer_config = try_get_sentence_transformer_config(
+                self.model, self.revision
+            )
+            is_cross_encoder = (
+                sentence_transformer_config is not None
+                and sentence_transformer_config.get("model_type") == "CrossEncoder"
+            )
+
         for arch in architectures:
             if arch in registry.get_supported_archs():
                 if runner_type == "generate" and registry.is_text_generation_model(
@@ -1211,13 +1222,15 @@ class ModelConfig:
             match = try_match_architecture_defaults(arch, runner_type=runner_type)
             if match:
                 _, (_, convert_type) = match
+                if runner_type == "pooling" and convert_type == "embed":
+                    return "classify" if is_cross_encoder else "embed"
                 return convert_type
 
         # This is to handle Sentence Transformers models that use *ForCausalLM
         # and also multi-modal pooling models which are not defined as
         # Sentence Transformers models
         if runner_type == "pooling":
-            return "embed"
+            return "classify" if is_cross_encoder else "embed"
 
         return "none"
 

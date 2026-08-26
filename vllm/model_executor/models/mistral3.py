@@ -425,6 +425,7 @@ class Mistral3ForConditionalGeneration(
             "model.language_model.": "language_model.model.",
             "model.vision_tower.": "vision_tower.",
             "model.multi_modal_projector.": "multi_modal_projector.",
+            "language_model.": "language_model.model.",
             "lm_head.": "language_model.lm_head.",
             # Some PEFT LoRAs are trained against the text submodule directly
             # and produce names like `base_model.model.model.layers.*`.

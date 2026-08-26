@@ -1127,6 +1127,9 @@ _MULTIMODAL_EXAMPLE_MODELS = {
         "mistralai/Mistral-Small-3.1-24B-Instruct-2503",
         extras={"fp8": "nm-testing/Mistral-Small-3.1-24B-Instruct-2503-FP8-dynamic"},
     ),
+    "Mistral3Model": _HfExamplesInfo(
+        "mistralai/Mistral-Small-3.1-24B-Instruct-2503",
+    ),
     "MolmoForCausalLM": _HfExamplesInfo(
         "allenai/Molmo-7B-D-0924",
         max_transformers_version="4.48",

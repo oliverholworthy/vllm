@@ -499,6 +499,10 @@ _MULTIMODAL_MODELS = {
         "mistral3",
         "Mistral3ForConditionalGeneration",
     ),
+    "Mistral3Model": (
+        "mistral3",
+        "Mistral3ForConditionalGeneration",
+    ),
     "MolmoForCausalLM": ("molmo", "MolmoForCausalLM"),
     "Molmo2ForConditionalGeneration": ("molmo2", "Molmo2ForConditionalGeneration"),
     "Moondream3ForCausalLM": ("moondream3", "Moondream3ForCausalLM"),

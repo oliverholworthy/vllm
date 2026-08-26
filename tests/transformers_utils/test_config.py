@@ -6,6 +6,7 @@ only get the `eos_token_id` from the tokenizer as defined by
 `BaseRenderer.get_eos_token_id`.
 """
 
+import json
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import MagicMock, patch
@@ -16,8 +17,11 @@ from vllm.config.model import ModelConfig
 from vllm.tokenizers import get_tokenizer
 from vllm.transformers_utils import config as config_module
 from vllm.transformers_utils.config import (
+    get_pooling_config,
     get_safetensors_params_metadata,
+    try_get_dense_modules,
     try_get_generation_config,
+    try_get_sentence_transformer_config,
 )
 
 
@@ -99,3 +103,75 @@ def test_safetensors_metadata_of_repo_without_safetensors():
         assert get_safetensors_params_metadata("some/pytorch-only-model") == {}
 
     get_safetensors_metadata.assert_called_once()
+
+
+def test_current_sentence_transformers_pooling_and_dense_metadata(tmp_path):
+    pooling_dir = tmp_path / "1_Pooling"
+    dense_dir = tmp_path / "2_Dense"
+    pooling_dir.mkdir()
+    dense_dir.mkdir()
+    (tmp_path / "config_sentence_transformers.json").write_text(
+        json.dumps({"model_type": "CrossEncoder", "activation_fn": "torch.nn.Identity"})
+    )
+    (tmp_path / "modules.json").write_text(
+        json.dumps(
+            [
+                {
+                    "idx": 1,
+                    "path": "1_Pooling",
+                    "type": (
+                        "sentence_transformers.sentence_transformer.modules.pooling.Pooling"
+                    ),
+                },
+                {
+                    "idx": 2,
+                    "path": "2_Dense",
+                    "type": "sentence_transformers.base.modules.dense.Dense",
+                },
+            ]
+        )
+    )
+    (pooling_dir / "config.json").write_text(
+        json.dumps(
+            {
+                "embedding_dimension": 4,
+                "pooling_mode": "mean",
+                "include_prompt": True,
+            }
+        )
+    )
+    dense_config = {
+        "in_features": 4,
+        "out_features": 1,
+        "bias": False,
+        "activation_function": "torch.nn.modules.linear.Identity",
+        "module_input_name": "sentence_embedding",
+        "module_output_name": "scores",
+    }
+    (dense_dir / "config.json").write_text(json.dumps(dense_config))
+
+    assert try_get_sentence_transformer_config(str(tmp_path), revision=None) == {
+        "model_type": "CrossEncoder",
+        "activation_fn": "torch.nn.Identity",
+    }
+    model_config = cast(
+        ModelConfig,
+        SimpleNamespace(
+            registry=SimpleNamespace(get_supported_archs=lambda: []),
+            model=str(tmp_path),
+            revision=None,
+        ),
+    )
+    assert (
+        ModelConfig._get_default_convert_type(
+            model_config, ["Mistral3Model"], "pooling"
+        )
+        == "classify"
+    )
+    assert get_pooling_config(str(tmp_path), revision=None) == {
+        "use_activation": False,
+        "seq_pooling_type": "MEAN",
+    }
+    assert try_get_dense_modules(str(tmp_path), revision=None) == [
+        {**dense_config, "folder": "2_Dense"}
+    ]

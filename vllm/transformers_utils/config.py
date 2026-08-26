@@ -848,20 +848,24 @@ def get_pooling_config(
 
     logger.info("Found sentence-transformers modules configuration.")
 
+    pooling_module_types = {
+        "sentence_transformers.models.Pooling",
+        "sentence_transformers.sentence_transformer.modules.pooling.Pooling",
+    }
     pooling = next(
-        (
-            item
-            for item in modules_dict
-            if item["type"] == "sentence_transformers.models.Pooling"
-        ),
+        (item for item in modules_dict if item.get("type") in pooling_module_types),
         None,
     )
+    normalize_module_types = {
+        "sentence_transformers.models.Normalize",
+        "sentence_transformers.sentence_transformer.modules.normalize.Normalize",
+    }
     normalize = bool(
         next(
             (
                 item
                 for item in modules_dict
-                if item["type"] == "sentence_transformers.models.Normalize"
+                if item.get("type") in normalize_module_types
             ),
             False,
         )
@@ -876,6 +880,11 @@ def get_pooling_config(
         logger.info("Found pooling configuration.")
 
         config: dict[str, Any] = {"use_activation": normalize}
+        if pooling_mode := pooling_dict.get("pooling_mode"):
+            pooling_type = parse_pooling_type(pooling_mode)
+            if pooling_type in SEQ_POOLING_TYPES:
+                config["seq_pooling_type"] = pooling_type
+
         for key, val in pooling_dict.items():
             if val is True:
                 pooling_type = parse_pooling_type(key)
@@ -1136,6 +1145,21 @@ def try_get_tokenizer_config(
 
 
 @cache
+def try_get_sentence_transformer_config(
+    model: str | Path,
+    revision: str | None = None,
+) -> dict[str, Any] | None:
+    try:
+        config = get_hf_file_to_dict(
+            "config_sentence_transformers.json", model, revision
+        )
+    except Exception:
+        return None
+
+    return config if isinstance(config, dict) else None
+
+
+@cache
 def try_get_dense_modules(
     model: str | Path,
     revision: str | None = None,
@@ -1150,6 +1174,7 @@ def try_get_dense_modules(
 
         _DENSE_MODULE_TYPES = {
             "sentence_transformers.models.Dense",
+            "sentence_transformers.base.modules.dense.Dense",
             "pylate.models.Dense.Dense",
         }
         dense_modules = [m for m in modules if m.get("type") in _DENSE_MODULE_TYPES]
