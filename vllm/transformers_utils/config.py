@@ -969,7 +969,6 @@ def get_config(
     return config
 
 
-
 class SentenceTransformersCrossEncoderConfig(NamedTuple):
     """Metadata for the supported modular CrossEncoder layout."""
 
@@ -1391,7 +1390,9 @@ def get_sentence_transformers_cross_encoder_config(
     if not all(isinstance(module, dict) for module in modules):
         raise ValueError("Sentence Transformers modules.json must contain objects.")
 
-    contains_pooling = any(module.get("type") in _ST_POOLING_MODULE_TYPES for module in modules)
+    contains_pooling = any(
+        module.get("type") in _ST_POOLING_MODULE_TYPES for module in modules
+    )
     is_supported_topology = (
         len(modules) == 3
         and modules[0].get("type") in _ST_TRANSFORMER_MODULE_TYPES
