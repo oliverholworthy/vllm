@@ -12,7 +12,10 @@ from vllm import PoolingParams, PoolingRequestOutput, PromptType
 from vllm.inputs import DataPrompt, EngineInput
 from vllm.lora.request import LoRARequest
 from vllm.renderers import ChatParams, TokenizeParams
-from vllm.renderers.chat_utils import ChatCompletionMessageParam
+from vllm.renderers.chat_utils import (
+    ChatCompletionMessageParam,
+    ChatTemplateContentFormatOption,
+)
 from vllm.renderers.inputs import DictPrompt
 
 from ...tasks import PoolingTask
@@ -137,6 +140,7 @@ class OfflineScoringInputsContext(OfflineInputsContext):
     scoring_data: ScoringData
     chat_template: str | None
     pooling_params: PoolingParams
+    chat_template_content_format: ChatTemplateContentFormatOption = "auto"
 
 
 @dataclass
@@ -183,6 +187,7 @@ class ScoringRenderParams(RenderParams):
     data_1: ScoreData
     data_2: ScoreData
     chat_template: str | None
+    chat_template_content_format: ChatTemplateContentFormatOption
     max_tokens_per_query: int
     max_tokens_per_doc: int
 

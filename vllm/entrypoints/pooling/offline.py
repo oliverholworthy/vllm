@@ -17,7 +17,10 @@ from vllm.outputs import (
     ScoringRequestOutput,
 )
 from vllm.pooling_params import PoolingParams
-from vllm.renderers.chat_utils import ChatTemplateConfig
+from vllm.renderers.chat_utils import (
+    ChatTemplateConfig,
+    ChatTemplateContentFormatOption,
+)
 from vllm.tasks import SCORE_TYPE_MAP, PoolingTask, SupportedTask
 
 from .base.io_processor import PoolingIOProcessor
@@ -293,6 +296,7 @@ class PoolingOfflineMixin(OfflineInferenceMixin):
         lora_request: list[LoRARequest] | LoRARequest | None = None,
         tokenization_kwargs: dict[str, Any] | None = None,
         chat_template: str | None = None,
+        chat_template_content_format: ChatTemplateContentFormatOption = "auto",
     ) -> list[ScoringRequestOutput]:
         """Generate similarity scores for all pairs `<text,text_pair>` or
           `<multi-modal data, multi-modal data pair>`.
@@ -327,6 +331,9 @@ class PoolingOfflineMixin(OfflineInferenceMixin):
             lora_request: LoRA request to use for generation, if any.
             chat_template: The chat template to use for the scoring. If None, we
                 use the model's default chat template.
+            chat_template_content_format: The format of message content passed
+                to the scoring template: "string" for plain text, "openai" for
+                structured content blocks, or "auto" to detect from the template.
             tokenization_kwargs: Overrides for `tokenizer.encode`.
 
         Returns:
@@ -379,6 +386,7 @@ class PoolingOfflineMixin(OfflineInferenceMixin):
             tokenization_kwargs=tokenization_kwargs,
             lora_request=lora_request,
             chat_template=chat_template,
+            chat_template_content_format=chat_template_content_format,
             priorities=None,
         )
 

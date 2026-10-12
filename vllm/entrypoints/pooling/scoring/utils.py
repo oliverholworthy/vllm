@@ -13,6 +13,7 @@ from vllm.renderers.chat_utils import (
     BaseMultiModalItemTracker,
     ChatCompletionContentPartParam,
     ChatCompletionContentPartTextParam,
+    ChatTemplateContentFormat,
     ConversationMessage,
     MultiModalItemTracker,
     _parse_chat_message_content_parts,
@@ -184,6 +185,7 @@ def _parse_score_content(
     role: str,
     data: ScoreData,
     mm_tracker: BaseMultiModalItemTracker,
+    content_format: ChatTemplateContentFormat = "string",
 ) -> list[ConversationMessage]:
     parts: Iterable[ChatCompletionContentPartParam]
     if isinstance(data, str):
@@ -197,7 +199,7 @@ def _parse_score_content(
         role=role,
         parts=parts,
         mm_tracker=mm_tracker,
-        wrap_dicts=False,
+        wrap_dicts=(content_format == "openai"),
         interleave_strings=False,
         multimodal_content_part_separator="",
     )
@@ -250,16 +252,50 @@ def parse_score_data(
     the correct behaviour for cross-encoder scoring, where query and
     document are concatenated into a single model prompt.
     """
+    conversation, mm_items, mm_uuids = parse_score_messages(
+        data_1, data_2, model_config
+    )
+    return (
+        _ensure_str(conversation[:1]),
+        _ensure_str(conversation[1:]),
+        mm_items,
+        mm_uuids,
+    )
+
+
+def parse_score_messages(
+    data_1: ScoreData,
+    data_2: ScoreData,
+    model_config: ModelConfig,
+    content_format: ChatTemplateContentFormat = "string",
+) -> tuple[
+    list[ConversationMessage], MultiModalDataDict | None, MultiModalUUIDDict | None
+]:
+    """Parse a scoring pair, retaining content blocks for OpenAI-format templates."""
     mm_tracker = MultiModalItemTracker(model_config)
-
-    content_1 = _parse_score_content("query", data_1, mm_tracker)
-    content_2 = _parse_score_content("document", data_2, mm_tracker)
-
-    prompt_1 = _ensure_str(content_1)
-    prompt_2 = _ensure_str(content_2)
+    conversation = _parse_score_content("query", data_1, mm_tracker, content_format)
+    conversation += _parse_score_content("document", data_2, mm_tracker, content_format)
     mm_items, mm_uuids = mm_tracker.resolve_items()
+    return conversation, mm_items, mm_uuids
 
-    return prompt_1, prompt_2, mm_items, mm_uuids
+
+def truncate_score_content(
+    content: str | list[dict[str, str]],
+    tokenizer,
+    max_tokens: int,
+) -> str | list[dict[str, str]]:
+    """Limit text tokens across content blocks without dropping media blocks."""
+    if isinstance(content, str):
+        return truncate_text_to_tokens(content, tokenizer, max_tokens)
+
+    result = []
+    for part in content:
+        if part["type"] == "text":
+            text = truncate_text_to_tokens(part["text"], tokenizer, max_tokens)
+            max_tokens -= len(tokenizer.encode(text, add_special_tokens=False))
+            part = {**part, "text": text}
+        result.append(part)
+    return result
 
 
 def compress_token_type_ids(token_type_ids: list[int]) -> int:
